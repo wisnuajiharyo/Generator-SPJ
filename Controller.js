@@ -32,3 +32,10 @@ function ctrlGetDropdowns() {
 function ctrlSaveKamus(data) {
   return repoSaveKamus(data);
 }
+
+/**
+ * Menyimpan data SPJ ke dalam histori sheet
+ */
+function ctrlSaveHistori(rowData) {
+  return repoSaveHistori(rowData);
+}

@@ -3,68 +3,441 @@
 <head>
   <meta charset="UTF-8">
   <title>Generator Kelengkapan SPJ</title>
-  <!-- Memanggil Bootstrap 5 untuk tampilan rapi tanpa perlu ngetik CSS manual -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  
+  <style>
+    @media print {
+        body * { visibility: hidden; }
+        #pdf-template, #pdf-template * { visibility: visible; }
+        #pdf-template { position: absolute; left: 0; top: 0; width: 100%; }
+    }
+
+    #pdf-template {
+        display: none;
+        width: 215.9mm;
+        min-height: 330.2mm; /* F4 */
+        padding: 15mm;
+        box-sizing: border-box;
+        font-family: 'Arial', sans-serif;
+        font-size: 12px;
+    }
+
+    .nota-area { 
+        height: 80mm; /* Dibuat lebih kecil */
+        border: 1px dashed #999; 
+        margin-bottom: 20mm; /* Memberi jarak agar info turun */
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #666;
+    }
+
+    .info-area table { width: 100%; }
+    .info-area td { padding: 3px 0; vertical-align: top; }
+    .label-col { width: 100px; }
+    </style>
 </head>
 <body class="bg-light">
 
-  <div class="container mt-5">
+  <div class="container mt-5 mb-5">
     <div class="row justify-content-center">
       <div class="col-md-8">
         <div class="card shadow-sm">
-          <div class="card-header bg-primary text-white">
+          <!-- Header Aplikasi -->
+          <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
             <h5 class="mb-0">Generator Kelengkapan Nota SPJ</h5>
+            <span id="app-badge" class="badge bg-light text-primary">Memuat...</span>
           </div>
           
           <div class="card-body" id="app-content">
-            <!-- Tampilan Loading (Animasi Muter) saat web pertama dibuka -->
+            <!-- Animasi Loading -->
             <div id="loading" class="text-center py-5">
               <div class="spinner-border text-primary" role="status"></div>
               <p class="mt-2 text-muted">Mengecek database dan kamus data...</p>
             </div>
             
-            <!-- Tempat untuk Form Inisiasi atau Form Generator nantinya -->
+            <!-- Wadah Utama Tampilan -->
             <div id="main-view"></div>
           </div>
-          
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Script untuk berkomunikasi dengan Backend (Controller.gs) -->
   <script>
+    // Array untuk menampung data sementara sebelum dikirim ke Google Sheets
+    let draftKamus = [];
+
+    // Dijalankan pertama kali saat halaman dibuka
     window.addEventListener('load', function() {
-      // Menjalankan fungsi ctrlGetAppStatus() di server saat halaman dimuat
+      loadAppStatus();
+    });
+
+    function loadAppStatus() {
+      document.getElementById('loading').style.display = 'block';
+      document.getElementById('main-view').innerHTML = '';
+      document.getElementById('app-badge').innerText = "Memuat...";
+
       google.script.run
         .withSuccessHandler(function(response) {
-          // Hilangkan animasi loading
           document.getElementById('loading').style.display = 'none';
           
-          const viewContainer = document.getElementById('main-view');
-          
-          // Logika Penentuan Mode Tampilan
           if (response.isSetupComplete) {
-            viewContainer.innerHTML = `
-              <div class="alert alert-success">
-                <strong>Mode Operasional Siap!</strong><br>
-                Kamus data DPA berhasil ditemukan. (Form Generator akan kita taruh di sini).
-              </div>`;
+            document.getElementById('app-badge').innerText = "Mode Operasional";
+            renderModeOperasional();
           } else {
-            viewContainer.innerHTML = `
-              <div class="alert alert-warning">
-                <strong>Mode Inisiasi!</strong><br>
-                Database masih kosong. (Form Setup DPA Tahunan akan kita taruh di sini).
-              </div>`;
+            document.getElementById('app-badge').innerText = "Mode Inisiasi";
+            renderModeInisiasi();
           }
         })
         .withFailureHandler(function(error) {
           document.getElementById('loading').style.display = 'none';
-          document.getElementById('main-view').innerHTML = `
-            <div class="alert alert-danger">Terjadi Kesalahan Server: ${error.message}</div>`;
+          document.getElementById('main-view').innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
         })
         .ctrlGetAppStatus();
-    });
+    }
+
+    // ==========================================
+    // RENDERER: MODE INISIASI (SETUP DPA)
+    // ==========================================
+    function renderModeInisiasi() {
+      const view = document.getElementById('main-view');
+      view.innerHTML = `
+        <div class="alert alert-info">
+          <strong>Selamat Datang!</strong><br>
+          Database DPA tahun ini masih kosong. Silakan setup Kamus Data DPA Anda. Anda bisa memasukkan beberapa Sub Kegiatan sekaligus.
+        </div>
+
+        <!-- Form Input -->
+        <div class="card mb-4 border-primary">
+          <div class="card-body">
+            <h6 class="card-title fw-bold">Tambah Sub Kegiatan</h6>
+            <div class="mb-3">
+              <label class="form-label text-muted small mb-1">Nama Sub Kegiatan</label>
+              <input type="text" id="input-subkeg" class="form-control" placeholder="Cth: Pemeliharaan Gedung Kantor">
+            </div>
+            
+            <label class="form-label text-muted small mb-1">Daftar Rekening Belanja di Sub Kegiatan Ini</label>
+            <div id="rekening-container">
+              <!-- Baris rekening pertama -->
+              <div class="row mb-2 rek-row">
+                <div class="col-5">
+                  <input type="text" class="form-control inp-norek" placeholder="No. Rekening">
+                </div>
+                <div class="col-5">
+                  <input type="text" class="form-control inp-namarek" placeholder="Nama Rekening (Cth: Belanja ATK)">
+                </div>
+                <div class="col-2">
+                  <button class="btn btn-outline-danger w-100" onclick="hapusBaris(this)">X</button>
+                </div>
+              </div>
+            </div>
+            
+            <button class="btn btn-sm btn-outline-secondary mb-3" onclick="tambahBaris()">+ Tambah Rekening Lain</button>
+            <br>
+            <button class="btn btn-primary" onclick="simpanKeDraft()">Tampung ke Tabel Bawah ↓</button>
+          </div>
+        </div>
+
+        <!-- Tabel Preview Draft -->
+        <h6 class="fw-bold text-secondary">Preview Kamus Data:</h6>
+        <div class="table-responsive mb-3">
+          <table class="table table-bordered table-sm">
+            <thead class="table-light">
+              <tr>
+                <th>Sub Kegiatan</th>
+                <th>No Rekening</th>
+                <th>Nama Rekening</th>
+              </tr>
+            </thead>
+            <tbody id="tabel-draft">
+              <tr><td colspan="3" class="text-center text-muted">Belum ada data</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <button class="btn btn-success w-100 py-2 fw-bold" id="btn-simpan-permanen" onclick="simpanPermanenKeSheet()" disabled>
+          Kirim & Simpan Permanen ke Database
+        </button>
+      `;
+    }
+
+    // ==========================================
+    // FUNGSI INTERAKSI: MODE INISIASI
+    // ==========================================
+    function tambahBaris() {
+      const container = document.getElementById('rekening-container');
+      const row = document.createElement('div');
+      row.className = 'row mb-2 rek-row';
+      row.innerHTML = `
+        <div class="col-5"><input type="text" class="form-control inp-norek" placeholder="No. Rekening"></div>
+        <div class="col-5"><input type="text" class="form-control inp-namarek" placeholder="Nama Rekening"></div>
+        <div class="col-2"><button class="btn btn-outline-danger w-100" onclick="hapusBaris(this)">X</button></div>
+      `;
+      container.appendChild(row);
+    }
+
+    function hapusBaris(btn) {
+      const container = document.getElementById('rekening-container');
+      if (container.children.length > 1) {
+        btn.parentElement.parentElement.remove();
+      } else {
+        alert('Minimal harus ada 1 rekening!');
+      }
+    }
+
+    function simpanKeDraft() {
+      const subKeg = document.getElementById('input-subkeg').value.trim();
+      if (!subKeg) {
+        alert('Nama Sub Kegiatan wajib diisi!');
+        return;
+      }
+
+      const rows = document.querySelectorAll('.rek-row');
+      let addedCount = 0;
+
+      // Iterasi setiap baris rekening dan kumpulkan ke dalam draft array
+      rows.forEach(row => {
+        const noRek = row.querySelector('.inp-norek').value.trim();
+        const namaRek = row.querySelector('.inp-namarek').value.trim();
+        
+        if (noRek && namaRek) {
+          draftKamus.push([subKeg, noRek, namaRek]);
+          addedCount++;
+        }
+      });
+
+      if (addedCount === 0) {
+        alert('Isi minimal 1 Nomor dan Nama Rekening dengan lengkap!');
+        return;
+      }
+
+      // Reset Form agar bisa ketik sub kegiatan selanjutnya
+      document.getElementById('input-subkeg').value = '';
+      document.getElementById('rekening-container').innerHTML = `
+        <div class="row mb-2 rek-row">
+          <div class="col-5"><input type="text" class="form-control inp-norek" placeholder="No. Rekening"></div>
+          <div class="col-5"><input type="text" class="form-control inp-namarek" placeholder="Nama Rekening"></div>
+          <div class="col-2"><button class="btn btn-outline-danger w-100" onclick="hapusBaris(this)">X</button></div>
+        </div>`;
+      
+      updateTabelDraft();
+    }
+
+    function updateTabelDraft() {
+      const tbody = document.getElementById('tabel-draft');
+      const btnPermanen = document.getElementById('btn-simpan-permanen');
+      
+      if (draftKamus.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">Belum ada data</td></tr>';
+        btnPermanen.disabled = true;
+        return;
+      }
+
+      // Render ulang isi tabel
+      tbody.innerHTML = '';
+      draftKamus.forEach(item => {
+        tbody.innerHTML += `
+          <tr>
+            <td>${item[0]}</td>
+            <td>${item[1]}</td>
+            <td>${item[2]}</td>
+          </tr>
+        `;
+      });
+      // Aktifkan tombol kirim
+      btnPermanen.disabled = false;
+    }
+
+    function simpanPermanenKeSheet() {
+      const btn = document.getElementById('btn-simpan-permanen');
+      btn.innerText = 'Menyimpan ke Database...';
+      btn.disabled = true;
+
+      google.script.run
+        .withSuccessHandler(function() {
+          alert('Kamus Data berhasil disimpan! Aplikasi akan memuat ulang ke Mode Operasional.');
+          draftKamus = []; 
+          loadAppStatus(); // Reload UI ke Mode Operasional
+        })
+        .withFailureHandler(function(err) {
+          alert('Gagal menyimpan: ' + err.message);
+          btn.innerText = 'Kirim & Simpan Permanen ke Database';
+          btn.disabled = false;
+        })
+        .ctrlSaveKamus(draftKamus);
+    }
+
+    // ==========================================
+    // RENDERER: MODE OPERASIONAL (Placeholder)
+    // ==========================================
+    // Variabel global untuk menyimpan data bertingkat
+    let kamusHierarchy = {};
+
+    // ==========================================
+    // RENDERER: MODE OPERASIONAL (FORM UTAMA)
+    // ==========================================
+    function renderModeOperasional() {
+      const view = document.getElementById('main-view');
+      view.innerHTML = `<div class="text-center py-4"><div class="spinner-border text-success" role="status"></div><p class="mt-2 text-muted">Menyiapkan form generator...</p></div>`;
+
+      // Mengambil data Kamus Data yang sudah dibentuk hierarki oleh backend
+      google.script.run
+        .withSuccessHandler(function(data) {
+          kamusHierarchy = data;
+          buildFormOperasional();
+        })
+        .withFailureHandler(function(err) {
+          view.innerHTML = `<div class="alert alert-danger">Error: ${err.message}</div>`;
+        })
+        .ctrlGetDropdowns();
+    }
+
+    function buildFormOperasional() {
+      // Membuat opsi untuk Dropdown 1 (Sub Kegiatan)
+      let subKegOptions = `<option value="">-- Pilih Sub Kegiatan --</option>`;
+      for (const subKeg in kamusHierarchy) {
+        subKegOptions += `<option value="${subKeg}">${subKeg}</option>`;
+      }
+
+      const view = document.getElementById('main-view');
+      view.innerHTML = `
+        <div class="card border-success mb-3 shadow-sm">
+          <div class="card-body">
+            <h6 class="card-title fw-bold text-success mb-4">Form Kelengkapan Nota SPJ</h6>
+            
+            <div class="mb-3">
+              <label class="form-label fw-bold small text-secondary">1. Sub Kegiatan (Wajib)</label>
+              <select id="opt-subkeg" class="form-select border-success" onchange="updateDropdownRekening()">
+                ${subKegOptions}
+              </select>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label fw-bold small text-secondary">2. Rekening (Wajib)</label>
+              <select id="opt-rek" class="form-select border-success" disabled>
+                <option value="">-- Pilih Sub Kegiatan Terlebih Dahulu --</option>
+              </select>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label fw-bold small text-secondary">3. Rincian Pekerjaan/Belanja (Wajib)</label>
+              <textarea id="inp-rincian" class="form-control border-success" rows="2" placeholder="Cth: Pembelian cat untuk pemeliharaan gedung aula kecamatan"></textarea>
+            </div>
+            
+            <hr class="my-4">
+            <h6 class="fw-bold small text-muted mb-3">Informasi Tambahan Vendor / Info Transfer (Opsional)</h6>
+            
+            <div class="row">
+              <div class="col-md-6 mb-2">
+                <label class="form-label small">Nama Toko / Penerima</label>
+                <input type="text" id="inp-vendor" class="form-control form-control-sm">
+              </div>
+              <div class="col-md-6 mb-2">
+                <label class="form-label small">NPWP</label>
+                <input type="text" id="inp-npwp" class="form-control form-control-sm">
+              </div>
+              <div class="col-md-6 mb-2">
+                <label class="form-label small">Nama Bank</label>
+                <input type="text" id="inp-bank" class="form-control form-control-sm">
+              </div>
+              <div class="col-md-6 mb-2">
+                <label class="form-label small">No. Rekening Vendor</label>
+                <input type="text" id="inp-rekvendor" class="form-control form-control-sm">
+              </div>
+              <div class="col-md-12 mb-2">
+                <label class="form-label small">Nominal Transaksi (Rp)</label>
+                <input type="number" id="inp-nominal" class="form-control form-control-sm" placeholder="Hanya angka">
+              </div>
+            </div>
+
+            <button class="btn btn-success w-100 mt-4 py-2 fw-bold shadow-sm" id="btn-generate" onclick="prosesGenerate()">
+              🖨️ Generate PDF & Simpan Histori
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    // Fungsi untuk memperbarui Dropdown 2 saat Dropdown 1 dipilih
+    function updateDropdownRekening() {
+      const subKeg = document.getElementById('opt-subkeg').value;
+      const optRek = document.getElementById('opt-rek');
+      
+      // Jika Sub Kegiatan dikosongkan kembali
+      if (!subKeg) {
+        optRek.innerHTML = `<option value="">-- Pilih Sub Kegiatan Terlebih Dahulu --</option>`;
+        optRek.disabled = true;
+        return;
+      }
+
+      // Ambil daftar rekening berdasarkan Sub Kegiatan yang dipilih
+      const rekeningList = kamusHierarchy[subKeg];
+      let rekOptions = `<option value="">-- Pilih Rekening Belanja --</option>`;
+      
+      rekeningList.forEach(rek => {
+        // Value menyimpan gabungan nomor dan nama rekening untuk mempermudah saat cetak PDF
+        rekOptions += `<option value="${rek.nomor}|${rek.nama}">${rek.nomor} - ${rek.nama}</option>`;
+      });
+
+      optRek.innerHTML = rekOptions;
+      optRek.disabled = false;
+    }
+
+    function prosesGenerate() {
+    const subKeg = document.getElementById('opt-subkeg').value;
+    const rekRaw = document.getElementById('opt-rek').value;
+    const rincian = document.getElementById('inp-rincian').value;
+    const nominal = document.getElementById('inp-nominal').value;
+    const vendor = document.getElementById('inp-vendor').value;
+    const rekVendor = document.getElementById('inp-rekvendor').value;
+
+    if (!subKeg || !rekRaw || !rincian) {
+        alert("Mohon lengkapi data!");
+        return;
+    }
+
+    // Isi data ke template
+    document.getElementById('pdf-subkeg').innerText = subKeg;
+    document.getElementById('pdf-rek').innerText = rekRaw;
+    document.getElementById('pdf-rincian').innerText = rincian;
+    document.getElementById('pdf-nominal').innerText = parseInt(nominal || 0).toLocaleString('id-ID');
+    document.getElementById('pdf-vendor').innerText = `${vendor || '-'} / ${rekVendor || '-'}`;
+    document.getElementById('pdf-tanggal').innerText = new Date().toLocaleDateString('id-ID');
+
+    // Tampilkan dan Print
+    document.getElementById('pdf-template').style.display = 'block';
+    window.print();
+    document.getElementById('pdf-template').style.display = 'none';
+
+    // Simpan histori (lengkap)
+    google.script.run
+        .withSuccessHandler(() => alert("Data SPJ berhasil disimpan!"))
+        .ctrlSaveHistori([new Date().getTime(), new Date().toLocaleString(), subKeg, rekRaw, rincian, nominal, vendor]);
+    }
   </script>
+
+  <div id="pdf-template">
+  <div class="nota-area">[ AREA TEMPEL NOTA / KUITANSI ]</div>
+  
+  <div class="info-area">
+    <table>
+      <tr><td class="label-col">Sub Kegiatan</td><td>: <span id="pdf-subkeg"></span></td></tr>
+      <tr><td class="label-col">Rekening DPA</td><td>: <span id="pdf-rek"></span></td></tr>
+      <tr><td class="label-col">Rincian</td><td>: <span id="pdf-rincian"></span></td></tr>
+      <tr><td class="label-col">Nominal</td><td>: Rp <span id="pdf-nominal"></span></td></tr>
+      <tr><td class="label-col">Bank/Rek Vendor</td><td>: <span id="pdf-vendor"></span></td></tr>
+    </table>
+
+    <div style="margin-top: 15mm; text-align: right;">
+      <p>Sleman, <span id="pdf-tanggal"></span></p>
+      <br><br><br>
+      <p>( ................................ )</p>
+    </div>
+  </div>
+</div>
+
+
 </body>
 </html>
